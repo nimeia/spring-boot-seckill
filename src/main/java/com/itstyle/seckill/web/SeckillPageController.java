@@ -1,6 +1,14 @@
 package com.itstyle.seckill.web;
 
 import com.itstyle.seckill.common.redis.RedisUtil;
+import com.itstyle.seckill.queue.kafka.KafkaSender;
+import com.tencentcloudapi.captcha.v20190722.CaptchaClient;
+import com.tencentcloudapi.captcha.v20190722.models.DescribeCaptchaResultRequest;
+import com.tencentcloudapi.captcha.v20190722.models.DescribeCaptchaResultResponse;
+import com.tencentcloudapi.common.Credential;
+import com.tencentcloudapi.common.exception.TencentCloudSDKException;
+import com.tencentcloudapi.common.profile.ClientProfile;
+import com.tencentcloudapi.common.profile.HttpProfile;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 
@@ -43,12 +51,17 @@ public class SeckillPageController {
 	private ActiveMQSender activeMQSender;
 
     @Autowired
+    private KafkaSender kafkaSender;
+
+    @Autowired
     private RedisUtil redisUtil;
-	
-	@Autowired
-	private HttpClient httpClient;
-	@Value("${qq.captcha.url}")
-	private String url;
+
+    @Value("${qq.captcha.endPoint}")
+    private String endPoint;
+    @Value("${qq.captcha.SecretId}")
+    private String secretId;
+    @Value("${qq.captcha.SecretKey}")
+    private String secretKey;
 	@Value("${qq.captcha.aid}")
 	private String aid;
 	@Value("${qq.captcha.AppSecretKey}")
@@ -65,29 +78,40 @@ public class SeckillPageController {
 	
 	@PostMapping("/startSeckill")
     public Result  startSeckill(String ticket,String randstr,HttpServletRequest request) {
-        HttpMethod method =HttpMethod.POST;
-        MultiValueMap<String, String> params= new LinkedMultiValueMap<String, String>();
-        params.add("aid", aid);
-        params.add("AppSecretKey", appSecretKey);
-        params.add("Ticket", ticket);
-        params.add("Randstr", randstr);
-        params.add("UserIP", IPUtils.getIpAddr());
-        String msg = httpClient.client(url,method,params);
-        /**
-         * response: 1:验证成功，0:验证失败，100:AppSecretKey参数校验错误[required]
-         * evil_level:[0,100]，恶意等级[optional]
-         * err_msg:验证错误信息[optional]
-         */
-        //{"response":"1","evil_level":"0","err_msg":"OK"}
-        JSONObject json = JSONObject.parseObject(msg);
-        String response = (String) json.get("response");
-        if("1".equals(response)){
-        	//进入队列、假数据而已
-        	Destination destination = new ActiveMQQueue("seckill.queue");
-        	activeMQSender.sendChannelMess(destination,1000+";"+1);
-        	return Result.ok();
-        }else{
-        	return Result.error("验证失败");
+        try {
+            Credential cred = new Credential(secretId, secretKey);
+            HttpProfile httpProfile = new HttpProfile();
+            httpProfile.setEndpoint(endPoint);
+            ClientProfile clientProfile = new ClientProfile();
+            clientProfile.setHttpProfile(httpProfile);
+            CaptchaClient client = new CaptchaClient(cred, "", clientProfile);
+            DescribeCaptchaResultRequest req = new DescribeCaptchaResultRequest();
+            req.setCaptchaType(9L);
+            req.setTicket(ticket);
+            req.setUserIp(IPUtils.getIpAddr());
+            req.setRandstr(randstr);
+            req.setCaptchaAppId(Long.valueOf(aid));
+            req.setAppSecretKey(appSecretKey);
+            DescribeCaptchaResultResponse resp = client.DescribeCaptchaResult(req);
+//            {"CaptchaCode":1,"CaptchaMsg":"OK","EvilLevel":0,"GetCaptchaTime":0,"RequestId":"8f11aabf-d319-4884-b6d3-8fa6fa561418"}
+            /**
+             * CaptchaCode: 1:验证成功，0:验证失败，100:AppSecretKey参数校验错误[required]
+             * EvilLevel:[0,100]，恶意等级[optional]
+             * CaptchaMsg:验证错误信息[optional]
+             */
+            JSONObject json = JSONObject.parseObject(DescribeCaptchaResultResponse.toJsonString(resp));
+            Integer response = (Integer) json.get("CaptchaCode");
+            if(1 == response) {
+                //进入队列、假数据而已
+                kafkaSender.sendChannelMess("seckill", 1000+";"+2);
+//                Destination destination = new ActiveMQQueue("seckill.queue");
+//                activeMQSender.sendChannelMess(destination,1000+";"+1);
+                return Result.ok();
+            }else{
+                return Result.error("验证失败");
+            }
+        } catch (TencentCloudSDKException e) {
+            return Result.error("验证失败");
         }
     }
 

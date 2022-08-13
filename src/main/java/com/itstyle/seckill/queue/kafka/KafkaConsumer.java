@@ -9,6 +9,9 @@ import com.itstyle.seckill.common.entity.Result;
 import com.itstyle.seckill.common.redis.RedisUtil;
 import com.itstyle.seckill.common.webSocket.WebSocketServer;
 import com.itstyle.seckill.service.ISeckillService;
+
+import javax.annotation.Resource;
+
 /**
  * 消费者 spring-kafka 2.0 + 依赖JDK8
  * @author 科帮网 By https://blog.52itstyle.com
@@ -17,8 +20,9 @@ import com.itstyle.seckill.service.ISeckillService;
 public class KafkaConsumer {
 	@Autowired
 	private ISeckillService seckillService;
-	
-	private static RedisUtil redisUtil = new RedisUtil();
+
+	@Autowired
+	private RedisUtil redisUtil;
     /**
      * 监听seckill主题,有消息就读取
      * @param message
@@ -32,9 +36,9 @@ public class KafkaConsumer {
     	if(redisUtil.getValue(array[0])==null){
     		Result result = seckillService.startSeckilAopLock(Long.parseLong(array[0]), Long.parseLong(array[1]));
 			if(result.equals(Result.ok(SeckillStatEnum.SUCCESS))){
-    			WebSocketServer.sendInfo(array[0], "秒杀成功");
+    			WebSocketServer.sendInfo("秒杀成功", array[0]);
     		}else{
-    			WebSocketServer.sendInfo(array[0], "秒杀失败");
+    			WebSocketServer.sendInfo("秒杀失败", array[0]);
     			redisUtil.cacheValue(array[0], "ok");
     		}
     	}else{
