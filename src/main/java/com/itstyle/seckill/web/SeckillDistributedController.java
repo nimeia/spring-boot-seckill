@@ -142,7 +142,7 @@ public class SeckillDistributedController {
 			executor.execute(task);
 		}
 		try {
-			Thread.sleep(10000);
+			Thread.sleep(30000);
 			redisUtil.cacheValue(killId+"", null);
 			Long  seckillCount = seckillService.getSeckillCount(seckillId);
 			LOGGER.info("一共秒杀出{}件商品",seckillCount);
